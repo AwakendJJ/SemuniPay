@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { useWallet } from "../context/WalletContext";
 import { useNavigate } from "react-router-dom";
 import { ethers } from "ethers";
+import { useAccount, useDisconnect, useChainId, useSwitchChain } from "wagmi";
 import {
   ChevronDown,
   Info,
@@ -17,14 +17,26 @@ const PRETIUM_API_KEY = import.meta.env.VITE_PRETIUM_API_KEY;
 const USDC_CONTRACT_ADDRESS =
   "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as `0x${string}`;
 const Dashboard: React.FC = () => {
-  const { account, disconnectWallet } = useWallet();
+  const networkTokens: Record<string, string[]> = {
+    Base: ["USDC"],
+    Celo: ["cUSD", "USDC", "USDT"],
+    Stellar: ["USDC"],
+  };
+
+  const { address } = useAccount()
+  const { disconnect } = useDisconnect()
+  const { chains, switchChain } = useSwitchChain();
+  const chainId = useChainId();
+
   const navigate = useNavigate();
+
+  const currentChain = chains.find((c) => c.id === chainId);
 
   // Mode toggle (spend or buy crypto)
   const [mode, setMode] = useState<"spend" | "buy">("spend");
 
   // State for form fields - Spend Crypto
-  const [selectedNetwork, setSelectedNetwork] = useState("Base");
+  const [selectedNetwork, setSelectedNetwork] = useState(currentChain?.name ?? "Base");
   const [selectedToken, setSelectedToken] = useState("USDC");
   const [amount, setAmount] = useState("0.5000");
   const [transferType, setTransferType] = useState("bank");
@@ -33,6 +45,7 @@ const Dashboard: React.FC = () => {
   const [recipientAccount, setRecipientAccount] = useState("12345678901");
   const [memo, setMemo] = useState("");
   const [usdcAmount, setUsdcAmount] = useState("");
+  const [availableTokens, setAvailableTokens] = useState<string[]>(networkTokens[selectedNetwork]);
 
   // Additional state for Buy Crypto
   const [depositFrom, setDepositFrom] = useState("Commercial Bank of Ethiopia");
@@ -75,6 +88,14 @@ const Dashboard: React.FC = () => {
   }
 
   useEffect(() => {
+    const currentChainName = chains.find((c) => c.id === chainId)?.name;
+    if (currentChainName) {
+      setSelectedNetwork(currentChainName);
+    }
+    console.log("Chain ID changed: ", chainId)
+  }, [chainId, chains]);
+
+  useEffect(() => {
      fetchExchangeRate();
     if (window.ethereum) {
       setProvider(new ethers.providers.Web3Provider(window.ethereum));
@@ -85,24 +106,27 @@ const Dashboard: React.FC = () => {
     }
   }, []);
 
+  useEffect(() => {
+    const tokens = networkTokens[selectedNetwork] || [];
+    setAvailableTokens(tokens);
+    // If the currently selected token is not in the new list, update it to the first available token.
+    if (!tokens.includes(selectedToken)) {
+      setSelectedToken(tokens[0] || "");
+    }
+  }, [selectedNetwork, selectedToken]); // Removed networkTokens and setSelectedToken from dependencies as they are stable.
+
   const handleDisconnect = () => {
-    disconnectWallet();
-    navigate("/");
+    console.log("handleDisconnect")
+    disconnect();
   };
 
   // Format wallet address to show first 6 and last 4 characters
-  const formatWalletAddress = (address: string) => {
-    if (!address) return "";
-    return `${address.substring(0, 6)}...${address.substring(
-      address.length - 4
+  const formatWalletAddress = (wallet_address: string) => {
+    if (!wallet_address) return "";
+    return `${wallet_address.substring(0, 6)}...${wallet_address.substring(
+      wallet_address.length - 4
     )}`;
   };
-
-  const networks = [
-    { id: "base", name: "Base", selected: true },
-    { id: "arbitrum", name: "Arbitrum", selected: false },
-    { id: "polygon", name: "Polygon", selected: false },
-  ];
 
   const banks = [
     "Commercial Bank of Ethiopia",
@@ -132,6 +156,7 @@ const Dashboard: React.FC = () => {
     }
   };
 
+
   const handleConfirmTransaction = async () => {
     if (!window.ethereum) {
       console.error("No wallet found.");
@@ -143,8 +168,8 @@ const Dashboard: React.FC = () => {
 
     const usdcValue = parseFloat(usdcAmount);
     if (isNaN(usdcValue) || usdcValue <= 0) {
-      console.error("Invalid USDC amount");
-      return;
+      console.log("Invalid USDC amount");
+      // return;
     }
     const usdc = new ethers.Contract(USDC_CONTRACT_ADDRESS, erc20Abi, signer);
     // ...existing code...
@@ -168,9 +193,9 @@ const Dashboard: React.FC = () => {
           shortcode: transactionData.recipientAccount,
           mobile_network: transactionData.recipientBank,
           chain: transactionData.network.toUpperCase(),
-          // 'type' is not required for ETB based on docs
+         
         };
-        console.log(body)
+        if(TransactionHash){
         let response = await fetch(`https://pretium-api-proxy.onrender.com/api/v1/pay/ETB`, {
           method: 'POST',
           headers: {
@@ -179,8 +204,10 @@ const Dashboard: React.FC = () => {
           },
           body: JSON.stringify(body),
         });
-
         console.log(response)
+        }
+
+        
 
     setTimeout(() => {
       setShowSuccessModal(true);
@@ -238,17 +265,25 @@ const Dashboard: React.FC = () => {
             SemuniPay
           </div>
         </div>
-        {account ? (
+        {address ? (
+          <div className="flex items-center space-x-3">
           <div className="bg-gray-800 text-lime-400 font-medium px-4 py-2 rounded-full border border-gray-700">
-            {formatWalletAddress(account)}
+            {formatWalletAddress(address)}
+          </div>
+           <button
+    className="bg-lime-400 text-gray-900 font-semibold px-6 py-2 rounded-full hover:bg-lime-300 transition-all duration-300"
+    onClick={() => handleDisconnect()}
+  >
+    Disconnect
+  </button>
           </div>
         ) : (
           <button
-            className="bg-lime-400 text-gray-900 font-semibold px-6 py-2 rounded-full hover:bg-lime-300 transition-all duration-300"
-            onClick={handleDisconnect}
-          >
-            Connect
-          </button>
+    className="bg-lime-400 text-gray-900 font-semibold px-6 py-2 rounded-full hover:bg-lime-300 transition-all duration-300"
+    onClick={() => navigate("/connect")}
+  >
+    Connect
+  </button>
         )}
       </header>
 
@@ -283,21 +318,21 @@ const Dashboard: React.FC = () => {
           {mode === "spend" ? (
             <>
               {/* Network selection - Spend Crypto */}
-              <div className="flex flex-wrap gap-1.5 mb-4">
-                {networks.map((network) => (
+              <div className="flex flex-wrap items-center gap-1.5 mb-4">
+                {chains.map((chain) => (
                   <button
-                    key={network.id}
+                    key={chain.id}
                     className={`flex items-center px-3 py-1.5 rounded-full text-sm ${
-                      network.id === selectedNetwork.toLowerCase()
+                      chain.id === currentChain?.id
                         ? "bg-lime-400 text-gray-900"
                         : "bg-gray-700 text-white"
                     }`}
-                    onClick={() => setSelectedNetwork(network.name)}
+                    onClick={() => switchChain?.({ chainId: chain.id })}
                   >
-                    {network.id === selectedNetwork.toLowerCase() && (
+                    {chain.id === currentChain?.id && (
                       <Check size={14} className="mr-1" />
                     )}
-                    {network.name}
+                    {chain.name}
                   </button>
                 ))}
 
@@ -317,9 +352,11 @@ const Dashboard: React.FC = () => {
                     onChange={(e) => setSelectedToken(e.target.value)}
                     className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-lime-400"
                   >
-                    <option value="USDC">USDC</option>
-                    <option value="ETH">ETH</option>
-                    <option value="BTC">BTC</option>
+                    {availableTokens.map((token) => (
+                      <option key={token} value={token}>
+                        {token}
+                      </option>
+                    ))}
                   </select>
                   <ChevronDown
                     size={16}
